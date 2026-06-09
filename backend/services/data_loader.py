@@ -5,13 +5,41 @@ import pandas as pd
 import logging
 import os
 
+from datetime import timedelta
+
 from flask import session
 from parsers.alipay import parse_alipay_csv
 from parsers.wechat import parse_wechat_csv, parse_wechat_xlsx
+from parsers.bank import parse_bank_pdf
+from parsers.bank_csv import parse_bank_csv
 from utils.file_utils import detect_file_source
 from utils.session import get_session_dir
 
 logger = logging.getLogger(__name__)
+
+
+# 去重所用的稳定标识列
+_DEDUP_KEYS = ['交易时间', '金额', '来源', '交易对方', '商品说明', '收/支']
+
+# 平台(支付宝/微信)转账类分类 → 统一归一为 转入/转出，与银行口径一致
+_TRANSFER_CATS = ['转账', '转账红包', '群收款', '微信红包', '微信红包（群红包）', '微信红包（单发）', '二维码收款', '红包']
+
+
+def _normalize_platform_transfers(df):
+    """把平台转账/红包/群收款(原 收入/支出) 归一为 转入/转出；余额宝/理财类的 不计收支 保留为内部搬运。"""
+    if '交易分类' not in df.columns:
+        return df
+    mask = df['来源'].isin(['支付宝', '微信']) & df['交易分类'].astype(str).isin(_TRANSFER_CATS)
+    df.loc[mask & (df['收/支'] == '收入'), '收/支'] = '转入'
+    df.loc[mask & (df['收/支'] == '支出'), '收/支'] = '转出'
+    return df
+
+
+# 跨源去重设计说明：
+# 银行流水中『对手含支付宝/财付通』的快捷支付＝平台代扣，bank 解析器已统一标记为『不计收支/平台代扣』。
+# - 2026 年：这些消费已在支付宝/微信账单(平台侧)统计一次，银行侧不计 → 不双算。
+# - 2025 年：平台账单未导出，银行侧无法可靠还原商户/转账/退款，故同样不计；如需准确统计 2025 年消费，
+#   请补传 2025 年的支付宝/微信账单(届时平台侧会正确计入，银行平台代扣仍不计，自动去重)。
 
 
 def load_demo_data():
@@ -68,14 +96,14 @@ def load_alipay_data():
             # 处理 CSV 文件
             if filename.endswith('.csv'):
                 try:
-                    # 判断是否为微信账单 (CSV格式)
-                    is_wechat_csv = (detect_file_source(filepath) == 'wechat')
-
-                    if is_wechat_csv:
+                    src = detect_file_source(filepath)
+                    if src == 'wechat':
                         df = parse_wechat_csv(filepath)
-                        all_data.append(df)
+                    elif src == 'bank-csv':
+                        df = parse_bank_csv(filepath)   # 银行 PDF 转换的支付宝样式 CSV(已去重/已分类转入转出)
                     else:
                         df = parse_alipay_csv(filepath)
+                    if df is not None and not df.empty:
                         all_data.append(df)
 
                 except Exception as e:
@@ -91,13 +119,38 @@ def load_alipay_data():
                     logger.error(f"处理 XLSX 文件 {filename} 失败: {str(e)}")
                     continue
 
+            # 处理 PDF 文件 (银行账单)
+            elif filename.lower().endswith('.pdf'):
+                try:
+                    df = parse_bank_pdf(filepath)
+                    if df is not None and not df.empty:
+                        all_data.append(df)
+                except Exception as e:
+                    logger.error(f"处理 PDF 银行账单 {filename} 失败: {str(e)}")
+                    continue
+
         if not all_data:
-            raise FileNotFoundError("未找到任何支付宝(.csv)或微信(.xlsx)账单文件")
+            raise FileNotFoundError("未找到任何支付宝(.csv)/微信(.xlsx)/银行(.pdf)账单文件")
 
         # 合并所有数据
         combined_df = pd.concat(all_data, ignore_index=True)
-        combined_df = combined_df.sort_values('交易时间')
 
+        # 交易级去重：修复重复上传/日期区间重叠导致的同笔重复统计
+        before = len(combined_df)
+        subset = [c for c in _DEDUP_KEYS if c in combined_df.columns]
+        combined_df = combined_df.drop_duplicates(subset=subset, keep='first')
+        if before != len(combined_df):
+            logger.info(f"交易级去重: {before} → {len(combined_df)} (删 {before - len(combined_df)} 重复)")
+
+        # 平台转账归一为 转入/转出（与银行口径一致，便于转账统计）
+        combined_df = _normalize_platform_transfers(combined_df)
+
+        # 清理内部辅助列
+        for c in ['_bclass', '_platdup']:
+            if c in combined_df.columns:
+                combined_df = combined_df.drop(columns=[c])
+
+        combined_df = combined_df.sort_values('交易时间')
         logger.info(f"加载账单数据: {len(combined_df)} 条记录")
 
         return combined_df

@@ -77,7 +77,7 @@ def list_files():
     files = []
     if os.path.exists(session_dir):
         for filename in os.listdir(session_dir):
-            if filename.endswith('.csv') or filename.endswith('.xlsx'):
+            if filename.lower().endswith(('.csv', '.xlsx', '.pdf')):
                 filepath = os.path.join(session_dir, filename)
                 files.append({
                     'name': filename,
@@ -93,7 +93,7 @@ def list_files():
 @files_bp.route('/api/files/<filename>', methods=['DELETE'])
 def delete_file(filename):
     """删除会话中的文件"""
-    if not filename.endswith(('.csv', '.xlsx')):
+    if not filename.lower().endswith(('.csv', '.xlsx', '.pdf')):
         return jsonify({'success': False, 'error': '无效的文件名'})
 
     try:

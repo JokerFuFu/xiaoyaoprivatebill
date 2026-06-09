@@ -62,3 +62,4 @@ docs/base/
 runtime/
 runtime_backup/
 
+.gstack/

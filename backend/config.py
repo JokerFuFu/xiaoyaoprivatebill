@@ -11,7 +11,7 @@ UPLOAD_FOLDER = os.path.join(DATA_DIR, 'upload')
 SESSION_FILE_DIR = os.path.join(DATA_DIR, 'flask_sessions')
 
 # ============ 文件上传配置 ============
-ALLOWED_EXTENSIONS = {'csv', 'xlsx'}
+ALLOWED_EXTENSIONS = {'csv', 'xlsx', 'pdf'}
 MAX_CONTENT_LENGTH = 16 * 1024 * 1024  # 16MB
 
 # ============ 会话配置 ============

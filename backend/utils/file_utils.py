@@ -20,8 +20,10 @@ def allowed_file(filename):
 
 
 def detect_file_source(filepath):
-    """检测文件是支付宝还是微信账单"""
+    """检测文件是支付宝/微信/银行账单"""
     filename = os.path.basename(filepath)
+    if filename.lower().endswith('.pdf'):
+        return 'bank'
     if filename.endswith('.xlsx'):
         return 'wechat'
     elif filename.endswith('.csv'):
@@ -31,6 +33,8 @@ def detect_file_source(filepath):
                 content = f.read(1024)
             if '微信支付账单' in content:
                 return 'wechat'
+            if ('银行对账单转换' in content) or ('PDF转支付宝样式' in content) or ('PDF 对账单转换' in content):
+                return 'bank-csv'
         except:
             pass
         return 'alipay'
