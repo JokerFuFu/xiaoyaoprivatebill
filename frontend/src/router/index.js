@@ -32,8 +32,18 @@ const routes = [
     component: () => import('@/views/Insights.vue')
   },
   {
+    path: '/channels',
+    name: 'channels',
+    component: () => import('@/views/Channels.vue')
+  },
+  {
     path: '/transactions',
     name: 'transactions',
+    component: () => import('@/views/Transactions.vue')
+  },
+  {
+    path: '/transfers',
+    name: 'transfers',
     component: () => import('@/views/Transactions.vue')
   },
   {

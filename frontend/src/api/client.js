@@ -38,6 +38,12 @@ export const api = {
   getAnalysis: (params) => get('/analysis', params),
 
   /**
+   * 获取渠道分析数据（银行卡/储蓄·信用/支付宝/微信）
+   * @param {Object} params - 查询参数 { year, min_amount, max_amount }
+   */
+  getChannelAnalysis: (params) => get('/channel_analysis', params),
+
+  /**
    * 获取时间分析数据
    * @param {Object} params - 查询参数 { year }
    */

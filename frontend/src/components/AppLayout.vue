@@ -44,6 +44,14 @@
           <i class="fas fa-receipt icon-transactions"></i>
           <span>交易记录</span>
         </router-link>
+        <router-link to="/transfers" class="nav-item" :class="{ active: $route.path === '/transfers' }">
+          <i class="fas fa-exchange-alt icon-transfers"></i>
+          <span>转账记录</span>
+        </router-link>
+        <router-link to="/channels" class="nav-item" :class="{ active: $route.path === '/channels' }">
+          <i class="fas fa-credit-card icon-channels"></i>
+          <span>渠道分析</span>
+        </router-link>
         <router-link to="/settings" class="nav-item" :class="{ active: $route.path === '/settings' }">
           <i class="fas fa-cog icon-settings"></i>
           <span>设置</span>
@@ -223,6 +231,8 @@ onMounted(async () => {
 .icon-time { color: #AF52DE; }
 .icon-insights { color: #FFCC00; }
 .icon-transactions { color: #30B0C7; }
+.icon-transfers { color: #AF52DE; }
+.icon-channels { color: #FF9500; }
 .icon-settings { color: #8E8E93; }
 .icon-author { color: #FF2D55; }
 
