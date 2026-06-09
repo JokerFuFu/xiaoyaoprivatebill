@@ -342,6 +342,316 @@ def analyze_payment_methods(df):
     return result
 
 
+# ============ 银行卡维度 ============
+BANK_BRAND = {
+    '农业银行': ('农行', '#00843D'), '中国银行': ('中行', '#AE1E23'),
+    '工商银行': ('工行', '#C7000B'), '建设银行': ('建行', '#004A98'),
+    '招商银行': ('招行', '#C50A26'), '民生银行': ('民生', '#0E9347'),
+    '交通银行': ('交行', '#003C7E'), '网商银行': ('网商', '#1677FF'),
+    '邮政储蓄': ('邮储', '#00854A'), '光大银行': ('光大', '#5B2D8E'),
+    '中信银行': ('中信', '#D7000F'), '宁波银行': ('宁波', '#C8161E'),
+    '平安银行': ('平安', '#E60012'), '浦发银行': ('浦发', '#003B7E'),
+}
+DIGITAL_WALLET = {
+    '花呗': ('花呗', '#1677FF'), '借呗': ('借呗', '#1677FF'),
+    '账户余额': ('支付宝余额', '#1677FF'), '余额宝': ('余额宝', '#FFB300'),
+    '零钱通': ('零钱通', '#07C160'), '零钱': ('微信零钱', '#07C160'),
+}
+
+
+def _extract_bank_brand(pay):
+    """从 收/付款方式 文本中抽取 (短名, 展示标签, 品牌色)。"""
+    import re
+    raw = str(pay or '').strip()
+    s = raw.split('&')[0].strip()
+    if not s or s.lower() in ('nan', 'none', 'null', '/'):
+        return ('其他', '其他/未知', '#9AA0A6')
+    for kw, (short, color) in DIGITAL_WALLET.items():
+        if kw in s:
+            return (short, short, color)
+    m = re.search(r'([一-龥]{2,}银行)', s)
+    tail = re.search(r'\((\d{3,4})\)', raw)
+    if m:
+        bank = m.group(1)
+        for k, (short, color) in BANK_BRAND.items():
+            if k in bank or bank in k:
+                ctype = '信用卡' if '信用卡' in s else ('储蓄卡' if ('储蓄卡' in s or '借记' in s) else '')
+                label = f"{short}{ctype}({tail.group(1)})" if tail else f"{short}{ctype}"
+                return (short, label, color)
+        return (bank[:2], bank, '#5856D6')
+    return (s[:6], s[:8], '#9AA0A6')
+
+
+def analyze_bank_cards(df):
+    """银行卡维度：按出资银行卡/钱包统计支出，附银行品牌色供前端图标。"""
+    if '收/付款方式' not in df.columns:
+        return []
+    expense = df[df['收/支'] == '支出'].copy()
+    if expense.empty:
+        return []
+    agg = {}
+    for _, row in expense.iterrows():
+        short, label, color = _extract_bank_brand(row.get('收/付款方式', ''))
+        item = agg.setdefault(label, {'bank': short, 'label': label, 'color': color, 'amount': 0.0, 'count': 0})
+        try:
+            item['amount'] += float(row['金额'])
+        except (TypeError, ValueError):
+            continue
+        item['count'] += 1
+    out = sorted(agg.values(), key=lambda x: -x['amount'])
+    for x in out:
+        x['amount'] = round(x['amount'], 2)
+    return out
+
+
+# ============ 渠道分析（银行卡/储蓄·信用/支付宝/微信 多维） ============
+# 电子钱包/虚拟账户识别规则（按特异性排序：长词在前，避免"余额宝/账户余额"被"余额"截胡）
+_WALLET_RULES = [
+    ('余额宝', '余额宝', '理财账户', '#FFB300'),
+    ('零钱通', '零钱通', '理财账户', '#2BA471'),
+    ('花呗', '花呗', '信用账户', '#1677FF'),
+    ('借呗', '借呗', '信用账户', '#1677FF'),
+    ('账户余额', '支付宝余额', '余额账户', '#1677FF'),
+    ('经营账户', '微信经营账户', '余额账户', '#07C160'),
+    ('零钱', '微信零钱', '余额账户', '#07C160'),
+    ('余额', '支付宝余额', '余额账户', '#1677FF'),
+]
+
+# 渠道大类（coarse group）→ 颜色（用于类型占比饼图等）
+_GROUP_COLOR = {
+    '信用卡': '#FF3B30', '储蓄卡': '#007AFF', '电子钱包': '#34C759',
+    '银行卡': '#5856D6', '未标注': '#9AA0A6',
+}
+
+# 平台（来源）展示
+_PLATFORM_META = {
+    '支付宝': ('支付宝', '#1677FF'), '微信': ('微信', '#07C160'),
+    '银行': ('银行直连', '#5B6B7B'), '示例数据': ('示例数据', '#8E8E93'),
+}
+
+
+def _bank_short_color(bankname):
+    """中文银行全名 → (短名, 品牌色)。"""
+    for k, (short, color) in BANK_BRAND.items():
+        if k in bankname or bankname in k:
+            return short, color
+    return bankname.replace('银行', '') or bankname, '#5856D6'
+
+
+def _channel_of(source, pay):
+    """把 (来源, 收/付款方式) 归一为一个资金渠道。
+
+    返回 dict: key(去重键)/label(展示)/kind(细类)/group(大类)/bank(短名)/card(后4位)/color。
+    - 银行卡：按 银行+卡号 识别，并区分 储蓄卡/信用卡（银行对账单=储蓄账户）。
+    - 电子钱包：余额宝/零钱通/花呗/借呗/支付宝余额/微信零钱/经营账户。
+    - 同一张实体卡跨平台（支付宝/微信/银行直连）归并到同一渠道。
+    """
+    import re
+    raw = str(pay or '').strip()
+    s = raw.split('&')[0].strip()              # 去掉 &优惠/&立减/&福利金 等修饰
+    low = s.lower()
+
+    m = re.search(r'([一-龥]{2,}银行)', s)
+    tail = re.search(r'\((\d{3,4})\)', raw)
+    if m:
+        short, color = _bank_short_color(m.group(1))
+        card = tail.group(1) if tail else ''
+        if '信用卡' in s:
+            kind = '信用卡'
+        elif ('储蓄卡' in s) or ('借记' in s):
+            kind = '储蓄卡'
+        elif str(source) == '银行':
+            kind = '储蓄卡'                     # 银行对账单都是借记/储蓄账户
+        else:
+            kind = '银行卡'                     # 卡种未标注，二次合并时按同卡号修正
+        ctp = '' if kind == '银行卡' else kind
+        label = f"{short}{ctp}({card})" if card else f"{short}{ctp or '银行卡'}"
+        return {'key': f"{short}|{card}|{kind}", 'label': label, 'kind': kind,
+                'group': '银行卡', 'bank': short, 'card': card, 'color': color}
+
+    if s and low not in ('nan', 'none', 'null', '/', '-'):
+        for kw, name, kind, color in _WALLET_RULES:
+            if kw in s:
+                return {'key': f"wallet|{name}", 'label': name, 'kind': kind,
+                        'group': '电子钱包', 'bank': name, 'card': '', 'color': color}
+
+    plat = str(source) if str(source) in ('支付宝', '微信', '银行') else '其他'
+    return {'key': f"未标注|{plat}", 'label': f"未标注（{plat}）", 'kind': '未标注',
+            'group': '未标注', 'bank': plat, 'card': '', 'color': '#9AA0A6'}
+
+
+# 细类 → 资金属性（信用 vs 储蓄/余额），供"信用 vs 储蓄"对比
+_CREDIT_KINDS = {'信用卡', '信用账户'}
+_DEBIT_KINDS = {'储蓄卡', '余额账户', '理财账户', '银行卡'}
+
+
+def _build_channel_metas(df):
+    """对 df 每行计算渠道元信息（含同卡号跨平台二次合并）。
+
+    返回 (metas, meta_by_pair)：metas 为与 df 行顺序对齐的 dict 列表。
+    供 analyze_channels（渠道分析页）与 get_transactions（交易明细"渠道"列/筛选）共用，保证口径一致。
+    """
+    pairs = df[['来源', '收/付款方式']].drop_duplicates()
+    meta_by_pair = {}
+    for _, r in pairs.iterrows():
+        meta_by_pair[(r['来源'], str(r['收/付款方式']))] = _channel_of(r['来源'], r['收/付款方式'])
+    # 二次合并：卡种未标注（银行卡）若同 (银行,卡号) 存在明确储蓄/信用，则归并
+    typed = {}
+    for meta in meta_by_pair.values():
+        if meta['card'] and meta['kind'] in ('信用卡', '储蓄卡'):
+            typed.setdefault((meta['bank'], meta['card']), meta)
+    for meta in meta_by_pair.values():
+        if meta['kind'] == '银行卡' and (meta['bank'], meta['card']) in typed:
+            t = typed[(meta['bank'], meta['card'])]
+            meta['kind'], meta['key'], meta['label'] = t['kind'], t['key'], t['label']
+    metas = [meta_by_pair[(s, str(p))] for s, p in zip(df['来源'], df['收/付款方式'])]
+    return metas, meta_by_pair
+
+
+def analyze_channels(df):
+    """渠道分析：按资金渠道（银行卡/储蓄·信用/钱包）与平台（支付宝/微信/银行）多维统计。"""
+    empty = {'channels': [], 'platforms': [], 'kind_summary': [],
+             'credit_debit': {}, 'monthly': {'months': [], 'series': []}, 'totals': {}}
+    if df is None or df.empty or '收/付款方式' not in df.columns:
+        return empty
+
+    d = df.copy()
+    if '是否退款' in d.columns:
+        d = d[~d['是否退款'].fillna(False)]
+    if d.empty:
+        return empty
+
+    # 1+2) 计算每行渠道元信息（含同卡号跨平台二次合并），与交易明细共用同一函数
+    metas, meta_by_pair = _build_channel_metas(d)
+    d['_ckey'] = [m['key'] for m in metas]
+    d['_clabel'] = [m['label'] for m in metas]
+    d['_ckind'] = [m['kind'] for m in metas]
+    d['_cgroup'] = [m['group'] for m in metas]
+
+    is_exp = d['收/支'] == '支出'
+    total_expense = float(d[is_exp]['金额'].sum())
+
+    def _split(g):
+        return {
+            'expense': round(float(g[g['收/支'] == '支出']['金额'].sum()), 2),
+            'income': round(float(g[g['收/支'] == '收入']['金额'].sum()), 2),
+            'transfer_in': round(float(g[g['收/支'] == '转入']['金额'].sum()), 2),
+            'transfer_out': round(float(g[g['收/支'] == '转出']['金额'].sum()), 2),
+            'internal': round(float(g[g['收/支'] == '不计收支']['金额'].sum()), 2),
+        }
+
+    # 3) 渠道（每张卡/钱包）
+    channels = []
+    for key, g in d.groupby('_ckey'):
+        meta = meta_by_pair_lookup(meta_by_pair, g)
+        sp = _split(g)
+        ecount = int((g['收/支'] == '支出').sum())
+        # 平台分布（该渠道在支付宝/微信/银行各花多少）
+        pb = []
+        for plat, pg in g.groupby('来源'):
+            pb.append({'platform': str(plat),
+                       'expense': round(float(pg[pg['收/支'] == '支出']['金额'].sum()), 2),
+                       'count': int(len(pg))})
+        pb.sort(key=lambda x: -x['expense'])
+        # top3 消费分类
+        eg = g[g['收/支'] == '支出']
+        tc = []
+        if not eg.empty:
+            cg = eg.groupby('交易分类')['金额'].sum().sort_values(ascending=False).head(3)
+            tc = [{'name': str(k), 'value': round(float(v), 2)} for k, v in cg.items()]
+        dates = g['交易时间']
+        channels.append({
+            'key': key, 'label': meta['label'], 'kind': meta['kind'], 'group': meta['group'],
+            'bank': meta['bank'], 'card': meta['card'], 'color': meta['color'],
+            **sp,
+            'count': int(len(g)), 'expense_count': ecount,
+            'avg': round(sp['expense'] / ecount, 2) if ecount else 0,
+            'expense_ratio': round(sp['expense'] / total_expense * 100, 1) if total_expense else 0,
+            'first_date': dates.min().strftime('%Y-%m-%d'),
+            'last_date': dates.max().strftime('%Y-%m-%d'),
+            'active_days': int(dates.dt.date.nunique()),
+            'platform_breakdown': pb,
+            'top_categories': tc,
+        })
+    channels.sort(key=lambda x: -x['expense'])
+
+    # 4) 平台维度
+    platforms = []
+    for plat, g in d.groupby('来源'):
+        name, color = _PLATFORM_META.get(str(plat), (str(plat), '#8E8E93'))
+        sp = _split(g)
+        platforms.append({
+            'platform': str(plat), 'name': name, 'color': color, **sp,
+            'count': int(len(g)), 'expense_count': int((g['收/支'] == '支出').sum()),
+            'expense_ratio': round(sp['expense'] / total_expense * 100, 1) if total_expense else 0,
+            'card_count': int(g['_ckey'].nunique()),
+        })
+    platforms.sort(key=lambda x: -x['expense'])
+
+    # 5) 类型（细类）占比 —— 基于支出
+    kind_summary = []
+    eg_all = d[is_exp]
+    for kind, g in eg_all.groupby('_ckind'):
+        amt = float(g['金额'].sum())
+        kind_summary.append({
+            'kind': str(kind), 'expense': round(amt, 2), 'count': int(len(g)),
+            'ratio': round(amt / total_expense * 100, 1) if total_expense else 0,
+            'color': _GROUP_COLOR.get(_KIND_GROUP.get(str(kind), str(kind)), '#9AA0A6'),
+        })
+    kind_summary.sort(key=lambda x: -x['expense'])
+
+    # 6) 信用 vs 储蓄/余额 对比
+    def _bucket(kinds):
+        sub = eg_all[eg_all['_ckind'].isin(kinds)]
+        cnt = int(len(sub))
+        amt = float(sub['金额'].sum())
+        return {'expense': round(amt, 2), 'count': cnt,
+                'avg': round(amt / cnt, 2) if cnt else 0,
+                'ratio': round(amt / total_expense * 100, 1) if total_expense else 0}
+    credit_debit = {'credit': _bucket(_CREDIT_KINDS), 'debit': _bucket(_DEBIT_KINDS)}
+
+    # 7) 月度 × 渠道 堆叠（支出，取支出 top6 渠道 + 其他）
+    em = eg_all.copy()
+    months, series = [], []
+    if not em.empty:
+        em['_m'] = em['交易时间'].dt.strftime('%Y-%m')
+        months = sorted(em['_m'].unique().tolist())
+        top_labels = [c['label'] for c in channels[:6]]
+        color_of = {c['label']: c['color'] for c in channels}
+        em['_grp'] = em['_clabel'].where(em['_clabel'].isin(top_labels), '其他')
+        pivot = em.groupby(['_grp', '_m'])['金额'].sum()
+        order = top_labels + (['其他'] if (em['_grp'] == '其他').any() else [])
+        for lab in order:
+            data = [round(float(pivot.get((lab, mth), 0.0)), 2) for mth in months]
+            series.append({'label': lab, 'color': color_of.get(lab, '#9AA0A6'), 'data': data})
+
+    totals = {
+        'expense': round(total_expense, 2),
+        'income': round(float(d[d['收/支'] == '收入']['金额'].sum()), 2),
+        'channel_count': len(channels),
+        'card_count': sum(1 for c in channels if c['group'] == '银行卡'),
+        'wallet_count': sum(1 for c in channels if c['group'] == '电子钱包'),
+        'platform_count': len(platforms),
+    }
+
+    return {'channels': channels, 'platforms': platforms, 'kind_summary': kind_summary,
+            'credit_debit': credit_debit, 'monthly': {'months': months, 'series': series},
+            'totals': totals}
+
+
+# 细类 → 大类（用于颜色归并）
+_KIND_GROUP = {
+    '信用卡': '信用卡', '储蓄卡': '储蓄卡', '银行卡': '银行卡',
+    '信用账户': '信用卡', '余额账户': '电子钱包', '理财账户': '电子钱包', '未标注': '未标注',
+}
+
+
+def meta_by_pair_lookup(meta_by_pair, g):
+    """从分组首行取回（合并后的）渠道元信息。"""
+    row = g.iloc[0]
+    return meta_by_pair[(row['来源'], str(row['收/付款方式']))]
+
+
 def generate_smart_tags(df):
     """生成智能标签（消费画像）"""
     expense_df = df[df['收/支'] == '支出'].copy()

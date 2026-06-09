@@ -18,6 +18,7 @@ from services.analysis import (
     analyze_engel_coefficient,
     analyze_weekend_vs_monday,
     analyze_payment_methods,
+    analyze_bank_cards,
     generate_smart_tags,
     generate_story_data,
     calculate_monthly_stats,

@@ -33,6 +33,9 @@ from services.analysis import (
     analyze_engel_coefficient,
     analyze_weekend_vs_monday,
     analyze_payment_methods,
+    analyze_bank_cards,
+    analyze_channels,
+    _build_channel_metas,
     generate_smart_tags,
     generate_story_data,
     calculate_monthly_stats,
@@ -103,6 +106,7 @@ def get_analysis():
                 'story_data': generate_story_data(df),
                 'tags': generate_smart_tags(df),
                 'payment_analysis': analyze_payment_methods(df),
+                'bank_card_analysis': analyze_bank_cards(df),
                 'chord_data': generate_chord_data(df),
                 'funnel_data': generate_funnel_data(df),
                 'quadrant_data': generate_quadrant_data(df),
@@ -971,6 +975,10 @@ def get_transactions():
     try:
         df = load_alipay_data()
 
+        # 渠道标签（与渠道分析页同口径：同卡号跨平台归并）。在全集上计算，保证下拉选项稳定。
+        _metas, _ = _build_channel_metas(df)
+        df = df.assign(_channel=[m['label'] for m in _metas])
+
         page = request.args.get('page', DEFAULT_PAGE, type=int)
         per_page = request.args.get('per_page', DEFAULT_PER_PAGE, type=int)
         per_page = min(per_page, MAX_PER_PAGE)
@@ -984,10 +992,28 @@ def get_transactions():
         max_amount = request.args.get('max_amount', type=float)
         type_ = request.args.get('type')
         search_query = request.args.get('search')
+        start_date = request.args.get('start_date')
+        end_date = request.args.get('end_date')
+        source = request.args.get('source')
+        channel = request.args.get('channel')
+        view = request.args.get('view', 'normal')  # normal=收支(排除转账) / transfer=转账记录
+
+        # 渠道下拉选项（全集去退款后，按笔数倒序，稳定不随其它筛选漂移）
+        _opt_df = df[~df['是否退款'].fillna(False)] if '是否退款' in df.columns else df
+        _opt_counts = _opt_df['_channel'].value_counts()
+        channel_options = [{'label': str(k), 'count': int(v)} for k, v in _opt_counts.items()]
 
         # 应用筛选条件
         if type_:
             df = df[df['收/支'] == type_]
+        if source:
+            df = df[df['来源'] == source]
+        if channel:
+            df = df[df['_channel'] == channel]
+        if start_date:
+            df = df[df['交易时间'] >= pd.to_datetime(start_date)]
+        if end_date:
+            df = df[df['交易时间'] < pd.to_datetime(end_date) + pd.Timedelta(days=1)]
 
         if search_query:
             mask = (
@@ -1012,9 +1038,50 @@ def get_transactions():
         if max_amount:
             df = df[df['金额'] <= max_amount]
 
-        df = df[df['收/支'].isin(['收入', '支出'])]
         df = df[~df['是否退款']]
+        # 转账判定：平台转账/红包 + 银行 转入/转出（自转/对外/理财/还款/搬运）+ 历史不计收支
+        is_transfer = df['交易分类'].isin(['转账', '转账红包']) | df['收/支'].isin(['不计收支', '转入', '转出'])
+        if view == 'transfer':
+            df = df[is_transfer]          # 转账记录 = 交易记录的子集
+        # 交易记录(normal) = 全部交易(含转账)，转账记录是其子集
         df = df.sort_values('交易时间', ascending=False)
+
+        # 筛选结果统计汇总（对整个筛选集，不只当前页）
+        income_sum = float(df[df['收/支'] == '收入']['金额'].sum())
+        expense_sum = float(df[df['收/支'] == '支出']['金额'].sum())
+        tin_sum = float(df[df['收/支'] == '转入']['金额'].sum())
+        tout_sum = float(df[df['收/支'] == '转出']['金额'].sum())
+        internal_sum = float(df[df['收/支'] == '不计收支']['金额'].sum())
+        summary = {
+            'count': int(len(df)),
+            'income': round(income_sum, 2),
+            'expense': round(expense_sum, 2),
+            'net': round(income_sum - expense_sum, 2),
+            'transfer_in': round(tin_sum, 2),
+            'transfer_out': round(tout_sum, 2),
+            'internal': round(internal_sum, 2),
+        }
+
+        # 图表数据（基于整个筛选集，供前端饼图/折线图）
+        chart = {'by_category': [], 'by_month': []}
+        if len(df) > 0:
+            # 饼图：交易记录只看消费(支出)分类；转账记录看转账分类(含不计收支搬运)
+            cat_df = df if view == 'transfer' else df[df['收/支'] == '支出']
+            if len(cat_df) > 0:
+                cat_g = cat_df.groupby('交易分类')['金额'].sum().abs().sort_values(ascending=False).head(10)
+                chart['by_category'] = [{'name': str(k), 'value': round(float(v), 2)} for k, v in cat_g.items()]
+            tmp = df.copy()
+            tmp['_m'] = tmp['交易时间'].dt.strftime('%Y-%m')
+            for m, g in tmp.groupby('_m'):
+                chart['by_month'].append({
+                    'month': m,
+                    'income': round(float(g[g['收/支'] == '收入']['金额'].sum()), 2),
+                    'expense': round(float(g[g['收/支'] == '支出']['金额'].sum()), 2),
+                    'transfer_in': round(float(g[g['收/支'] == '转入']['金额'].sum()), 2),
+                    'transfer_out': round(float(g[g['收/支'] == '转出']['金额'].sum()), 2),
+                    'internal': round(float(g[g['收/支'] == '不计收支']['金额'].sum()), 2),
+                })
+            chart['by_month'].sort(key=lambda x: x['month'])
 
         total_records = len(df)
         total_pages = (total_records + per_page - 1) // per_page
@@ -1033,13 +1100,17 @@ def get_transactions():
                 'category': str(row['交易分类']),
                 'type': str(row['收/支']),
                 'amount': float(row['金额']),
-                'status': str(row['交易状态']),
-                'counterparty': str(row.get('交易对方', '')) if pd.notna(row.get('交易对方')) else ''
+                'status': str(row['交易状态']) if pd.notna(row.get('交易状态')) else '交易成功',
+                'counterparty': str(row.get('交易对方', '')) if pd.notna(row.get('交易对方')) else '',
+                'channel': str(row['_channel']) if pd.notna(row.get('_channel')) else ''
             })
 
         return jsonify({
             'success': True,
             'transactions': transactions,
+            'summary': summary,
+            'chart': chart,
+            'channel_options': channel_options,
             'pagination': {
                 'current_page': page,
                 'per_page': per_page,
@@ -1054,6 +1125,30 @@ def get_transactions():
             'success': False,
             'error': f'获取交易记录失败: {str(e)}'
         }), 500
+
+
+@analysis_bp.route('/api/channel_analysis')
+def channel_analysis():
+    """渠道分析：银行卡（储蓄/信用·按卡号）/支付宝/微信 多维统计。"""
+    try:
+        df = load_alipay_data()
+
+        year = request.args.get('year', type=int)
+        if year:
+            df = df[df['交易时间'].dt.year == year]
+
+        min_amount = request.args.get('min_amount', type=float)
+        max_amount = request.args.get('max_amount', type=float)
+        if min_amount:
+            df = df[df['金额'] >= min_amount]
+        if max_amount:
+            df = df[df['金额'] <= max_amount]
+
+        return jsonify({'success': True, 'data': analyze_channels(df)})
+
+    except Exception as e:
+        logger.error(f"渠道分析出错: {str(e)}", exc_info=True)
+        return jsonify({'success': False, 'error': f'渠道分析失败: {str(e)}'}), 500
 
 
 @analysis_bp.route('/api/top_transactions')
