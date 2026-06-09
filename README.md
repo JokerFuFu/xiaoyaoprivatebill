@@ -9,6 +9,10 @@
 
 [English](README_EN.md) | 简体中文
 
+> 🍴 **本项目 Fork 自 [dtsola/xiaoyaoprivatebill](https://github.com/dtsola/xiaoyaoprivatebill)。**
+> 在原作者以 MIT 协议开源的基础上，本 Fork 扩展了**银行账单接入、转入/转出口径、转账记录页、渠道分析、交易明细多维筛选**等功能。
+> 原项目与原作者信息见下文「[作者介绍](#作者介绍)」与「[致谢](#致谢)」，所有新增内容同样遵循 MIT 协议。
+
 <p align="center">
   <img src="docs/产品文档/产品截图/宣传海报图.png" alt="小遥账单助手宣传海报">
 </p>
@@ -27,7 +31,10 @@
 - 🔒 **隐私安全** - 数据完全本地处理，不上传任何服务器
 - 🔐 **手动清除** - 随时手动清除账单数据，完全掌控您的财务隐私
 - 📊 **多维度分析** - 年度、月度、分类、时间、消费洞察
-- 📁 **多格式支持** - 支付宝 CSV、微信 CSV/XLSX 账单文件
+- 📁 **多格式支持** - 支付宝 CSV、微信 CSV/XLSX、银行对账单 CSV
+- 🏦 **银行账单接入**（本 Fork） - 银行 PDF 对账单转 CSV 后导入，自动按方向归类收支/转账
+- 🔀 **转账记录独立**（本 Fork） - 转入/转出口径，平台转账·红包·自转账单列「转账记录」
+- 💳 **渠道分析**（本 Fork） - 按银行卡（储蓄/信用·区分卡号）、电子钱包、支付宝、微信多维拆解
 - 🚀 **快速部署** - Docker 一键启动，开箱即用
 - 💻 **前后端分离** - Vue 3 + Flask 架构，易于维护扩展
 - 📱 **响应式设计** - 支持桌面端和移动端访问
@@ -61,6 +68,18 @@
 <p align="center">
   <small>微信联系 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 开发者交流群 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 用户交流群</small>
 </p>
+
+---
+
+## 本 Fork 的增强
+
+> 以下为本 Fork（[JokerFuFu/xiaoyaoprivatebill](https://github.com/JokerFuFu/xiaoyaoprivatebill)）相对原项目 [dtsola/xiaoyaoprivatebill](https://github.com/dtsola/xiaoyaoprivatebill) 新增的能力，沿用原项目 MIT 协议。
+
+- **🏦 银行账单接入**：新增 `parsers/bank.py`（民生 / 农行 / 中行 PDF 对账单解析）与 `parsers/bank_csv.py`（银行 PDF → 支付宝样式 CSV），导入后来源标记为「银行」。
+- **♻️ 跨源去重**：交易级去重，且银行侧的「平台代扣（支付宝 / 财付通快捷支付）」自动计入「不计收支」，避免与平台账单对同一笔消费双算。
+- **🔀 转入 / 转出口径与转账记录**：收/支扩展为 `收入 / 支出 / 转入 / 转出 / 不计收支`；平台转账·红包·群收款与银行自转 / 对外 / 理财 / 还款按方向归一；新增 **「转账记录」** 页（交易记录的子集）。
+- **💳 渠道分析**：新增 **「渠道分析」** 页与 `/api/channel_analysis`，按平台（支付宝 / 微信 / 银行）、资金渠道（银行卡区分储蓄 / 信用 + 卡号、电子钱包）、信用 vs 储蓄、月度趋势等多维统计；同一张实体卡跨平台自动归并。
+- **🔎 交易明细增强**：新增 **「渠道」列** 与按渠道筛选，可叠加 时间段 / 类型 / 金额范围 / 关键字 筛选，底部汇总与饼图 / 折线图随筛选结果联动。
 
 ---
 
@@ -328,6 +347,7 @@ deactivate
 | Pandas | Latest | 数据处理核心 |
 | NumPy | Latest | 数值计算 |
 | OpenPyXL | Latest | Excel 文件处理 |
+| pdfplumber | Latest | 银行 PDF 对账单解析（本 Fork） |
 
 ### 前端
 
@@ -396,9 +416,13 @@ xiaoyaoprivatebill/
 
 ## 致谢
 
-本项目的前端和后端完全重构自优秀开源项目 [alipay_record_analysis](https://github.com/Hessel2333/alipay_record_analysis)，感谢原作者 **Hessel2333** 提供的灵感和基础代码。
+**本 Fork 基于 [dtsola/xiaoyaoprivatebill](https://github.com/dtsola/xiaoyaoprivatebill) 二次开发**，在其完整的 Vue 3 + Flask 架构上新增了银行账单接入、转入/转出口径、转账记录与渠道分析等功能。衷心感谢原作者 **dtsola** 的开源工作（作者信息见上文「[作者介绍](#作者介绍)」）。
 
-在原项目的基础上，本项目进行了以下改进：
+而原项目 [xiaoyaoprivatebill](https://github.com/dtsola/xiaoyaoprivatebill) 的前后端又完全重构自优秀开源项目 [alipay_record_analysis](https://github.com/Hessel2333/alipay_record_analysis)，感谢更上游的作者 **Hessel2333** 提供的灵感和基础代码。
+
+> 致谢链路：**Hessel2333**（alipay_record_analysis）→ **dtsola**（xiaoyaoprivatebill，本 Fork 的直接上游）→ **本 Fork**（JokerFuFu）。
+
+原作者 dtsola 在 Hessel2333 项目基础上的改进：
 - 前端从 Jinja2 模板重构为 Vue 3 + Vite 现代化架构
 - 后端从单体应用重构为模块化蓝图架构
 - 优化前端、后端性能
@@ -437,6 +461,7 @@ A: 目前支持：
 - 支付宝 CSV 账单
 - 微信 CSV 账单
 - 微信 XLSX 账单
+- 银行对账单 CSV（由银行 PDF 对账单转换为支付宝样式，本 Fork 新增）
 
 ### Q: 数据会上传到服务器吗？
 
@@ -457,15 +482,17 @@ A:
 
 ## 许可证
 
-本项目采用 [MIT 许可证](LICENSE)
+本项目沿用上游的 [MIT 许可证](LICENSE)，版权归原作者所有：`Copyright (c) 2026 dtsola`。
+本 Fork 的所有新增与修改同样以 MIT 协议开源，使用时请保留原始版权与许可声明。
 
 ---
 
 ## 联系方式
 
-- 项目主页: [GitHub](https://github.com/dtsola/xiaoyaoprivatebill)
-- 问题反馈: [Issues](https://github.com/dtsola/xiaoyaoprivatebill/issues)
+- 本 Fork: [JokerFuFu/xiaoyaoprivatebill](https://github.com/JokerFuFu/xiaoyaoprivatebill)
+- 原项目（上游）: [dtsola/xiaoyaoprivatebill](https://github.com/dtsola/xiaoyaoprivatebill)
+- 问题反馈: [Issues](https://github.com/JokerFuFu/xiaoyaoprivatebill/issues)
 
 ---
 
-**Made with ❤️ by Xiaoyao Team**
+**本 Fork 基于 dtsola 的 [小遥账单助手](https://github.com/dtsola/xiaoyaoprivatebill) 二次开发 · Made with ❤️**

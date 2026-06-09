@@ -9,6 +9,10 @@
 
 English | [简体中文](README.md)
 
+> 🍴 **This is a fork of [dtsola/xiaoyaoprivatebill](https://github.com/dtsola/xiaoyaoprivatebill).**
+> Built on the original author's MIT-licensed project, this fork adds **bank statement ingestion, transfer-in/out classification, a dedicated Transfers page, channel analysis, and multi-dimension filtering for the transaction list**.
+> See "[Author](#author)" and "[Acknowledgments](#acknowledgments)" below for the original project and author. All additions remain under the MIT license.
+
 <p align="center">
   <img src="docs/产品文档/产品截图/宣传海报图.png" alt="Xiaoyao Bill Assistant Poster">
 </p>
@@ -27,7 +31,10 @@ Xiaoyao Private Bill Analyzer is a **privacy-first** personal bill analysis tool
 - 🔒 **Privacy First** - All data is processed locally, nothing is uploaded to any server
 - 🔐 **Manual Clear** - Manually clear bill data anytime, have full control of your financial privacy
 - 📊 **Multi-dimensional Analysis** - Yearly, monthly, category, time, and consumption insights
-- 📁 **Multiple Format Support** - Alipay CSV, WeChat CSV/XLSX bill files
+- 📁 **Multiple Format Support** - Alipay CSV, WeChat CSV/XLSX, and bank statement CSV
+- 🏦 **Bank Statement Ingestion** (this fork) - Import bank PDF statements converted to CSV, auto-classified as income/expense/transfer by direction
+- 🔀 **Dedicated Transfers** (this fork) - Transfer-in/out classification; platform transfers, red packets and self-transfers listed under a separate "Transfers" page
+- 💳 **Channel Analysis** (this fork) - Breakdown by bank card (debit/credit, per card number), e-wallets, Alipay and WeChat
 - 🚀 **Quick Deployment** - One-click Docker setup, ready to use
 - 💻 **Frontend-Backend Separation** - Vue 3 + Flask architecture, easy to maintain and extend
 - 📱 **Responsive Design** - Supports desktop and mobile access
@@ -61,6 +68,18 @@ Xiaoyao Private Bill Analyzer is a **privacy-first** personal bill analysis tool
 <p align="center">
   <small>WeChat Contact &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; Developer Community &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; User Community</small>
 </p>
+
+---
+
+## Enhancements in This Fork
+
+> The capabilities below are added by this fork ([JokerFuFu/xiaoyaoprivatebill](https://github.com/JokerFuFu/xiaoyaoprivatebill)) on top of the upstream project [dtsola/xiaoyaoprivatebill](https://github.com/dtsola/xiaoyaoprivatebill), under the same MIT license.
+
+- **🏦 Bank statement ingestion**: new `parsers/bank.py` (Minsheng / ABC / BOC PDF statement parsing) and `parsers/bank_csv.py` (bank PDF → Alipay-style CSV); imported records are tagged with source "Bank".
+- **♻️ Cross-source dedup**: transaction-level deduplication, plus bank-side "platform quick-pay (Alipay / Tenpay)" entries are marked as "not counted", avoiding double-counting the same purchase already present in the platform bill.
+- **🔀 Transfer-in/out & Transfers page**: income/expense is extended to `Income / Expense / Transfer-in / Transfer-out / Not counted`; platform transfers, red packets, group payments, and bank self/external/wealth/repayment moves are normalized by direction; adds a **"Transfers"** page (a subset of the transaction list).
+- **💳 Channel analysis**: a new **"Channels"** page and `/api/channel_analysis`, with multi-dimension stats by platform (Alipay / WeChat / Bank), funding channel (bank cards split into debit/credit + card number, e-wallets), credit vs debit, and monthly trends; the same physical card used across platforms is merged into one channel.
+- **🔎 Transaction list enhancements**: a new **"Channel" column** and channel filter, combinable with date-range / type / amount-range / keyword filters; the bottom summary and pie/line charts update live with the filtered result.
 
 ---
 
@@ -328,6 +347,7 @@ After analysis, results can be exported as:
 | Pandas | Latest | Data processing core |
 | NumPy | Latest | Numerical computing |
 | OpenPyXL | Latest | Excel file processing |
+| pdfplumber | Latest | Bank PDF statement parsing (this fork) |
 
 ### Frontend
 
@@ -396,9 +416,13 @@ xiaoyaoprivatebill/
 
 ## Acknowledgments
 
-This project's frontend and backend are completely refactored from the excellent open-source project [alipay_record_analysis](https://github.com/Hessel2333/alipay_record_analysis). Special thanks to the original author **Hessel2333** for the inspiration and foundation code.
+**This fork is built on top of [dtsola/xiaoyaoprivatebill](https://github.com/dtsola/xiaoyaoprivatebill)**, adding bank statement ingestion, transfer-in/out classification, a Transfers page, and channel analysis on its solid Vue 3 + Flask architecture. Sincere thanks to the original author **dtsola** for the open-source work (see "[Author](#author)" above).
 
-Based on the original project, this project has made the following improvements:
+The upstream project [xiaoyaoprivatebill](https://github.com/dtsola/xiaoyaoprivatebill) itself was completely refactored from the excellent open-source project [alipay_record_analysis](https://github.com/Hessel2333/alipay_record_analysis). Thanks to the further-upstream author **Hessel2333** for the inspiration and foundation code.
+
+> Credit chain: **Hessel2333** (alipay_record_analysis) → **dtsola** (xiaoyaoprivatebill, the direct upstream of this fork) → **this fork** (JokerFuFu).
+
+Improvements dtsola made on top of the Hessel2333 project:
 - Frontend refactored from Jinja2 templates to Vue 3 + Vite modern architecture
 - Backend refactored from monolithic application to modular blueprint architecture
 - Optimized frontend and backend performance
@@ -437,6 +461,7 @@ A: Currently supports:
 - Alipay CSV bills
 - WeChat CSV bills
 - WeChat XLSX bills
+- Bank statement CSV (bank PDF statements converted to Alipay-style CSV; added by this fork)
 
 ### Q: Is data uploaded to servers?
 
@@ -457,15 +482,17 @@ A:
 
 ## License
 
-This project is licensed under the [MIT License](LICENSE)
+This project inherits the upstream [MIT License](LICENSE). Copyright belongs to the original author: `Copyright (c) 2026 dtsola`.
+All additions and modifications in this fork are likewise released under the MIT license; please retain the original copyright and license notice when reusing.
 
 ---
 
 ## Contact
 
-- Project Homepage: [GitHub](https://github.com/dtsola/xiaoyaoprivatebill)
-- Issue Tracker: [Issues](https://github.com/dtsola/xiaoyaoprivatebill/issues)
+- This fork: [JokerFuFu/xiaoyaoprivatebill](https://github.com/JokerFuFu/xiaoyaoprivatebill)
+- Upstream project: [dtsola/xiaoyaoprivatebill](https://github.com/dtsola/xiaoyaoprivatebill)
+- Issue Tracker: [Issues](https://github.com/JokerFuFu/xiaoyaoprivatebill/issues)
 
 ---
 
-**Made with ❤️ by Xiaoyao Team**
+**A fork built on dtsola's [Xiaoyao Private Bill Analyzer](https://github.com/dtsola/xiaoyaoprivatebill) · Made with ❤️**
