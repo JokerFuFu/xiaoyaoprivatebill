@@ -10,6 +10,21 @@ DATA_DIR = os.path.join(BASE_DIR, 'data')
 UPLOAD_FOLDER = os.path.join(DATA_DIR, 'upload')
 SESSION_FILE_DIR = os.path.join(DATA_DIR, 'flask_sessions')
 
+# ============ 多用户/鉴权配置 ============
+USERS_FILE = os.path.join(DATA_DIR, 'users.json')          # 全局账号表(werkzeug 哈希密码)
+SECRET_KEY_FILE = os.path.join(DATA_DIR, '.flask_secret')  # 持久化 secret,避免重启登出
+# 首次启动 bootstrap 管理员(uid 固定 user_local 以保留既有数据目录)
+# 真实账号/口令通过环境变量(.env)注入;代码内仅留通用默认,避免 PII/口令入库
+BOOTSTRAP_ADMIN_USERNAME = os.environ.get('ADMIN_USERNAME', 'admin')
+BOOTSTRAP_ADMIN_PASSWORD = os.environ.get('ADMIN_PASSWORD', 'admin12345')
+BOOTSTRAP_ADMIN_DISPLAY = os.environ.get('ADMIN_DISPLAY', '管理员')
+
+# ============ AI(Anthropic 兼容端点,默认 Kimi) ============
+AI_BASE_URL = os.environ.get('ANTHROPIC_BASE_URL', 'https://api.kimi.com/coding/').rstrip('/')
+AI_API_KEY = os.environ.get('ANTHROPIC_API_KEY', '')
+AI_MODEL = os.environ.get('AI_MODEL', 'kimi-k2-0905-preview')
+AI_ENABLED = bool(AI_API_KEY)
+
 # ============ 文件上传配置 ============
 ALLOWED_EXTENSIONS = {'csv', 'xlsx', 'pdf'}
 MAX_CONTENT_LENGTH = 16 * 1024 * 1024  # 16MB
